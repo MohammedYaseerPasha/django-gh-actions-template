@@ -1,0 +1,64 @@
+name: 🚀 Deploy Python App to EC2 via Docker
+
+on:
+  push:
+    branches:
+      - master  # Trigger deployment on push to 'master'
+
+jobs:
+  deploy:
+    name: Build & Deploy Python App
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🛎️ Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📤 Copy Files to EC2
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          source: "."
+          target: "/home/${{ secrets.EC2_USER }}/python-app"
+
+      - name: 🚀 SSH & Deploy Docker Container
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            echo "🔧 Installing Docker if not present..."
+            if ! command -v docker &> /dev/null; then
+              sudo apt-get update -y
+              sudo apt-get install -y docker.io
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              sudo usermod -aG docker $USER || echo "⚠️ Docker group setup may require logout/login"
+            else
+              echo "✅ Docker already installed."
+              sudo systemctl start docker
+            fi
+
+            echo "📁 Switching to app directory..."
+            cd /home/${{ secrets.EC2_USER }}/python-app
+
+            echo "🧼 Cleaning up old container..."
+            sudo docker stop python-app || true
+            sudo docker rm python-app || true
+
+            echo "🐳 Building Docker image..."
+            sudo docker build -t python-app .
+
+            echo "🚀 Running Docker container..."
+            sudo docker run -d \
+              --name python-app \
+              -p 8000:8000 \
+              -e DJANGO_SETTINGS_MODULE=rlms.settings \
+              -e DATABASE_URL=${{ secrets.DATABASE_URL }} \
+              -e SECRET_KEY=${{ secrets.SECRET_KEY }} \
+              python-app
+
+            echo "✅ Python app deployed and accessible on port 8000" 
